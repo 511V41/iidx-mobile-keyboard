@@ -1,7 +1,28 @@
 const config = require("./config.json");
-const keypress = require('keypress');
-const adb = require('adbkit');
+const ioHook = require("iohook");
+const adb = require("adbkit");
 const client = adb.createClient();
+
+const keyFrom = (() => {
+  const map = new Map();
+  Object.keys(config).forEach((key) => {
+    map.set(config[key].keycode, key);
+  });
+  return key => map.get(key);
+})();
+
+const tap = (x, y) => {
+  return [
+    // down
+    "sendevent /dev/input/event1 1 330 1",
+    `sendevent /dev/input/event1 3 53 ${x}`,
+    `sendevent /dev/input/event1 3 54 ${y}`,
+    "sendevent /dev/input/event1 0 0 0",
+    // up
+    "sendevent /dev/input/event1 1 330 0",
+    "sendevent /dev/input/event1 0 0 0",
+  ].join(";");
+};
 
 const device = async () => {
   const devices = await client.listDevices();
@@ -13,53 +34,25 @@ const device = async () => {
   return devices[0].id;
 };
 
-const dispatchEvent = async (id, name) => {
-  const commands = config[name];
-  for (const command of commands) {
-    await client.shell(id, command);
-  }
+const dispatch = async (id, name) => {
+  const { x, y } = config[name];
+  await client.shell(id, tap(x, y));
 };
 
 const main = async () => {
   const id = await device();
-  keypress(process.stdin);
-  process.stdin.on('keypress', async (ch, key) => {
-    console.info(key.name);
-    if (!key.ctrl) {
-      switch (key.name) {
-        case "a":
-          await dispatchEvent(id, "turntable");
-          break;
-        case "z":
-          await dispatchEvent(id, "key1");
-          break;
-        case "s":
-          await dispatchEvent(id, "key2");
-          break;
-        case "x":
-          await dispatchEvent(id, "key3");
-          break;
-        case "d":
-          await dispatchEvent(id, "key4");
-          break;
-        case "c":
-          await dispatchEvent(id, "key5");
-          break;
-        case "f":
-          await dispatchEvent(id, "key6");
-          break;    
-        case "v":
-          await dispatchEvent(id, "key7");
-          break;    
-      }
+  console.info(`target device is ${id}`);
+  ioHook.on("keydown", async event => {
+    const key = keyFrom(event.rawcode);
+    if (event.ctrlKey || !key) {
+      return;
     }
-    // Ctrl + C
-    if (key && key.ctrl && key.name == 'c') {
-      process.stdin.pause();
-    }
+    await dispatch(id, key);
   });
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
+  ioHook.on("keyup", event => {
+    // console.log(event);
+  });
+  ioHook.start();
 };
 
 main();
